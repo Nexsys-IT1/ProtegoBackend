@@ -35,11 +35,7 @@ def login_user(payload: UserCreate, db: Session = Depends(get_db)):
     response= {
         "access_token": token,
         "token_type": "bearer",
-        "user": {
-            "id": user.id,
-            "email": user.email,
-            "name": user.full_name,
-        }
+        "user": user  # FastAPI will validate against TokenUser
         }
     return response
 
