@@ -72,11 +72,6 @@ def get_rak_quotes(payload: TravelInsuranceRequest, db: Session) -> Dict[str, An
     except Exception:
         real_quote = {"error": "Invalid JSON", "raw": response.text}
 
-    # Optional: debug log
-    print("\n===== RAK RAW RESPONSE =====")
-    print(json.dumps(real_quote, indent=2))
-    print("===== END RAK RESPONSE =====\n")
-
     # 5) Extract plans from raw response
     plans_raw = [
         p
@@ -91,19 +86,18 @@ def get_rak_quotes(payload: TravelInsuranceRequest, db: Session) -> Dict[str, An
         "insurer": "RAK",
         "insurer_name": "RAK Insurance",
         "plans": mapped_plans,
-        "raw_insurer_response": real_quote,
         "error": None,
     }
 
 
 # ---------------------------------------------------------------------------
-# Temporary token provider (to be replaced with DB lookup)
+# token provider
 # ---------------------------------------------------------------------------
 
 def get_rak_token(db: Session) -> str | None:
     provider = (
         db.query(ThirdPartyAuth)
-        .filter(ThirdPartyAuth.name.ilike("%rak%"))  # match RAK Insurance
+        .filter(ThirdPartyAuth.name.ilike("%rak%")) 
         .first()
     )
 
