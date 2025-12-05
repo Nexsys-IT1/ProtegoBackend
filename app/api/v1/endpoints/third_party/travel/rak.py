@@ -42,7 +42,9 @@ def get_rak_quotes(payload: TravelInsuranceRequest, db: Session) -> Dict[str, An
 
     # 2) Build insurer request body
     rak_request_body = build_rak_request(canonical_payload)
-
+    print("\n===== RAK RAW REQUEST =====")
+    print(json.dumps(rak_request_body, indent=2))
+    print("===== END RAK REQUEST =====\n")
     token = get_rak_token(db)
 
     headers = {
@@ -122,60 +124,63 @@ def build_rak_request(canonical_payload: Dict[str, Any]) -> Dict[str, Any]:
     travel = canonical_payload["travel_details"]
     personal = canonical_payload["personal_details"]
 
-    # Dates and duration
     start_iso = _to_iso_date(travel["travel_dates"]["start_date"])
     end_iso = _to_iso_date(travel["travel_dates"]["end_date"])
     trip_duration = _days_inclusive(start_iso, end_iso)
 
-    # Travellers
     travellers = travel["travellers"]
     traveller_info = _map_travellers_simple(travellers)
 
-    # Required UI fields
-    destination = travel["destination"]
-    departure = travel["departure"]
+    # --- coverage_type decides inbound vs outbound ---
+    coverage_type_raw = str(travel.get("coverage_type", "")).strip()
+    coverage_type_lower = coverage_type_raw.lower()
 
-    # tripType mapping (Single vs Annual)
-    plan_type = str(travel.get("plan_type", "")).lower()
-    if "single" in plan_type:
-        trip_type = "Single"
-    elif "annual" in plan_type or "amt" in plan_type:
-        trip_type = "Annual"
+    if coverage_type_lower == "uae inbound":
+        # Inbound → user gives FROM (departure), TO is fixed UAE
+        departure = travel.get("departure") or ""
+        destination = "UAE"
+        travel_type_value = "Inbound"
     else:
-        trip_type = travel.get("trip_type") or "Single"
+        # Outbound (Worldwide / Schengen / etc.)
+        # FROM is UAE, user gives TO (destination)
+        departure = "UAE"
+        destination = travel.get("destination") or ""
+        travel_type_value = "Outbound"
 
-    # cover_type -> traveller label
+    # 🔹 NEW: tripType logic (depends on travelType)
+    plan_type_raw = str(travel.get("plan_type", "")).lower()
+    if travel_type_value == "Inbound":
+        # RAK expects just "Single" for inbound
+        trip_type_value = "Single"
+    else:
+        # Outbound: use full names
+        if "annual" in plan_type_raw:
+            trip_type_value = "Annual Trip"
+        else:
+            trip_type_value = "Single Trip"
+
+    # cover_type → traveller label
     traveller_label = travel.get("cover_type") or (
         "Individual" if len(travellers) == 1 else "Family"
     )
 
-    # coverage amount (fallback to duration if not provided)
+    # coverage amount
     coverage = travel.get("coverage") or str(trip_duration)
 
-    # coverage type from UI
-    coverage_type = str(travel.get("coverage_type", "")).strip()
+    # incWorldwide logic for UI display
+    inc_worldwide = coverage_type_lower == "worldwide"
 
-    # travelType logic
-    if coverage_type.lower() == "uae inbound":
-        travel_type_value = "Inbound"
-    else:
-        travel_type_value = "Outbound"
-
-    # incWorldwide logic
-    inc_worldwide = coverage_type.lower() == "worldwide"
-
-    # Contact details
     email = personal.get("email", "")
     contact_no = personal.get("mobile_number", "")
 
-    return {
+    rak_request = {
         "tripStartDate": start_iso,
         "tripEndDate": end_iso,
         "tripDuration": trip_duration,
         "travelType": travel_type_value,
         "destination": destination,
         "departure": departure,
-        "tripType": trip_type,
+        "tripType": trip_type_value,
         "traveller": traveller_label,
         "noOfTravellers": str(len(travellers)),
         "travelling": "Yes",
@@ -185,6 +190,11 @@ def build_rak_request(canonical_payload: Dict[str, Any]) -> Dict[str, Any]:
         "email": email,
         "contactNo": contact_no,
     }
+
+    print("\n====== RAK QUOTES SINGLE EVENT ======")
+    print(json.dumps(rak_request, indent=2))
+    print("=====================================\n")
+    return rak_request
 
 
 # ---------------------------------------------------------------------------

@@ -99,7 +99,7 @@ def authenticate_gulf(db: Session, provider: ThirdPartyAuth):
      return data
     else:
         print(f"[AUTH-GULF] Token still valid for {provider.name}")
-        return provider.auth_config.get("token")
+        return provider.auth_config.get("access_token")
 
 
 

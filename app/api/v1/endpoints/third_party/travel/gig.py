@@ -102,6 +102,29 @@ def _map_plan_card_gig(plan: Dict[str, Any]) -> Dict[str, Any]:
 # -------------------------------------------------------------------
 # Helpers for request building
 # -------------------------------------------------------------------
+COUNTRY_CODE_MAP: Dict[str, Dict[str, str]] = {
+    "uae": {"code": "ARE", "value": "United Arab Emirates"},
+    "united arab emirates": {"code": "ARE", "value": "United Arab Emirates"},
+    "australia": {"code": "AUS", "value": "Australia"},
+    "aus": {"code": "AUS", "value": "Australia"},
+    # add more as needed
+}
+
+def _country_to_code_and_name(raw: str) -> Dict[str, str]:
+    if not raw:
+        return {"code": "", "value": ""}
+    key = raw.strip().lower()
+    mapped = COUNTRY_CODE_MAP.get(key)
+    if mapped:
+        return mapped
+    return {"code": raw, "value": raw}
+
+GIG_AREA_OF_COVERAGE_MAP = {
+    "uae inbound": {"code": "IB", "value": "Inbound"},
+    "worldwide": {"code": "WWXUC", "value": "Worldwide excluding USA/Canada"},
+    "schengen": {"code": "SCH", "value": "Schengen"},
+}
+
 def _to_iso_date(val: Any) -> str:
     if isinstance(val, date):
         return val.isoformat()
@@ -125,9 +148,8 @@ def _build_insured_members(travellers: List[Dict[str, Any]]) -> List[Dict[str, A
 
 def build_gig_request(canonical_payload: Dict[str, Any]) -> Dict[str, Any]:
     travel = canonical_payload["travel_details"]
-    # personal = canonical_payload["personal_details"]  # not used for GIG request (for now)
 
-    # 1) Dates
+    # dates
     start_iso = _to_iso_date(travel["travel_dates"]["start_date"])
     end_iso = _to_iso_date(travel["travel_dates"]["end_date"])
 
@@ -135,33 +157,33 @@ def build_gig_request(canonical_payload: Dict[str, Any]) -> Dict[str, Any]:
     effective_date = f"{start_iso}T00:00:00"
     expiration_date = f"{end_iso}T23:59:59"
 
-    # 2) Policy type (static for this product)
-    policy_type = {
-        "code": "1",
-        "value": "Single Trip",
-    }
+    policy_type = {"code": "1", "value": "Single Trip"}
 
-    # 3) Origin / Destination (Inbound: origin = CDM departure, destination = UAE)
-    origin_code = str(travel.get("departure", "")).strip() or "AUS"
-    origin_value = origin_code  # you can later map this to full country name
+    coverage_type_raw = str(travel.get("coverage_type", "")).strip()
+    coverage_type_lower = coverage_type_raw.lower()
 
-    destination_countries = [
-        {
-            "code": "ARE",
-            "value": "United Arab Emirates",
-        }
-    ]
+    # ===== ORIGIN / DESTINATION rules =====
+    if coverage_type_lower == "uae inbound":
+        # Inbound → FROM user, TO UAE
+        origin_raw = travel.get("departure", "")
+        origin_country = _country_to_code_and_name(origin_raw)
 
-    # 4) Area of coverage (always inbound for this product)
-    area_of_coverage = {
-        "code": "IB",
-        "value": "Inbound",
-    }
+        destination_country = COUNTRY_CODE_MAP["uae"]
+    else:
+        # Outbound → FROM UAE, TO user
+        origin_country = COUNTRY_CODE_MAP["uae"]
 
-    # 5) Insured members from travellers
+        dest_raw = travel.get("destination", "")
+        destination_country = _country_to_code_and_name(dest_raw)
+
+    # Area of coverage
+    area_of_coverage = GIG_AREA_OF_COVERAGE_MAP.get(
+        coverage_type_lower,
+        {"code": "IB", "value": "Inbound"},  # sensible default / fallback
+    )
+
     insured_members = _build_insured_members(travel.get("travellers", []))
 
-    # 6) Static product config
     gig_request = {
         "policySchedule": {
             "creationDate": creation_date,
@@ -171,23 +193,27 @@ def build_gig_request(canonical_payload: Dict[str, Any]) -> Dict[str, Any]:
         },
         "travelInformation": {
             "originCountry": {
-                "code": origin_code,
-                "value": origin_value,
+                "code": origin_country["code"],
+                "value": origin_country["value"],
             },
-            "destinationCountries": destination_countries,
+            "destinationCountries": [
+                {
+                    "code": destination_country["code"],
+                    "value": destination_country["value"],
+                }
+            ],
             "areaOfCoverage": area_of_coverage,
         },
         "insuredMembers": insured_members,
         "schemeId": "64824A00001",
-        "branchId": {
-            "code": "13",
-            "value": "Dubai",
-        },
+        "branchId": {"code": "13", "value": "Dubai"},
         "includeOriginalPremium": "true",
         "includeOptionalCoverPremium": "true",
     }
-
-    return gig_request
+    print("\n====== GIG QUOTES SINGLE EVENT ======")
+    print(json.dumps(gig_request, indent=2))
+    print("=====================================\n")
+    return gig_request    
 
 
 # -------------------------------------------------------------------
@@ -211,7 +237,7 @@ def get_gig_token(db: Session) -> Optional[str]:
     if not token:
         print("Failed to authenticate GIG")
         return None
-    return provider.auth_config.get("token")
+    return provider.auth_config.get("access_token")
 
 
 # -------------------------------------------------------------------
@@ -258,27 +284,21 @@ def get_gig_quotes(payload: TravelInsuranceRequest, db: Session) -> Dict[str, An
     except Exception:
         resp_data = {"error": "Invalid JSON", "raw": response.text}
 
-    # Optional: debug log
-    print("\n===== GIG RAW RESPONSE =====")
-    print(json.dumps(resp_data, indent=2))
-    print("===== END GIG RESPONSE =====\n")
-
     if response.status_code >= 400:
         return {
             "insurer": "GIG",
             "insurer_name": "GIG Gulf",
             "plans": [],
-            "raw_insurer_response": resp_data,
             "error": f"GIG returned HTTP {response.status_code}",
         }
 
     plans_raw = resp_data.get("eligiblePlans") or []
     mapped_plans = [_map_plan_card_gig(p) for p in plans_raw]
-
-    return {
+    
+    result = {
         "insurer": "GIG",
         "insurer_name": "GIG Gulf",
         "plans": mapped_plans,
-        "raw_insurer_response": resp_data,
         "error": None,
     }
+    return result
