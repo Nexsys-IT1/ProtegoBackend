@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.schemas.lob.travel import TravelInsuranceRequest
+from app.schemas.travel import TravelInsuranceRequest
 from app.api.v1.endpoints.third_party.travel.rak import get_rak_quotes
 from app.utils.sse import sse_parallel
 

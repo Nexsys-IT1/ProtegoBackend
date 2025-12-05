@@ -3,7 +3,7 @@ from datetime import date, datetime
 import json
 import requests
 from sqlalchemy.orm import Session
-from app.schemas.lob.travel import TravelInsuranceRequest
+from app.schemas.travel import TravelInsuranceRequest
 from app.db.models.third_party_api import ThirdPartyAuth
 from app.api.v1.endpoints.third_party.travel.auth import authenticate_rak
 
