@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.schemas.lob.travel import TravelInsuranceRequest
 from app.api.v1.endpoints.third_party.travel.rak import get_rak_quotes
+from app.api.v1.endpoints.third_party.travel.gig import get_gig_quotes
 from app.utils.sse import sse_parallel
 
 router = APIRouter()
@@ -12,11 +13,18 @@ router = APIRouter()
 async def get_quotes(payload: TravelInsuranceRequest, db: Session = Depends(get_db)):
     async def rak_job():
         return get_rak_quotes(payload, db)
+    
+    async def gig_job():
+        return get_gig_quotes(payload, db)
 
     func_list = [
         {
             "name": "rak",   
             "func": rak_job
+        },
+        {
+            "name": "gig",   
+            "func": gig_job
         }
     ]
 
