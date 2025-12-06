@@ -149,7 +149,7 @@ def _build_insured_members(travellers: List[Dict[str, Any]]) -> List[Dict[str, A
 def build_gig_request(canonical_payload: Dict[str, Any]) -> Dict[str, Any]:
     travel = canonical_payload["travel_details"]
 
-    # dates
+    # 1) Dates
     start_iso = _to_iso_date(travel["travel_dates"]["start_date"])
     end_iso = _to_iso_date(travel["travel_dates"]["end_date"])
 
@@ -157,41 +157,30 @@ def build_gig_request(canonical_payload: Dict[str, Any]) -> Dict[str, Any]:
     effective_date = f"{start_iso}T00:00:00"
     expiration_date = f"{end_iso}T23:59:59"
 
+    # 2) Policy type – always Single Trip for now
     policy_type = {"code": "1", "value": "Single Trip"}
 
+    # 3) coverage_type decides Inbound vs Outbound
     coverage_type_raw = str(travel.get("coverage_type", "")).strip()
     coverage_type_lower = coverage_type_raw.lower()
 
-    # ===== ORIGIN / DESTINATION rules =====
+    # ===== ORIGIN / DESTINATION + AREA OF COVERAGE =====
     if coverage_type_lower == "uae inbound":
-        # Inbound → FROM user, TO UAE
+        # 🔹 Inbound:
+        #   origin = user departure
+        #   destination = UAE
+        #   areaOfCoverage = IB
         origin_raw = travel.get("departure", "")
         origin_country = _country_to_code_and_name(origin_raw)
 
         destination_country = COUNTRY_CODE_MAP["uae"]
-    else:
-        # Outbound → FROM UAE, TO user
-        origin_country = COUNTRY_CODE_MAP["uae"]
 
-        dest_raw = travel.get("destination", "")
-        destination_country = _country_to_code_and_name(dest_raw)
+        area_of_coverage = {
+            "code": "IB",
+            "value": "Inbound",
+        }
 
-    # Area of coverage
-    area_of_coverage = GIG_AREA_OF_COVERAGE_MAP.get(
-        coverage_type_lower,
-        {"code": "IB", "value": "Inbound"},  # sensible default / fallback
-    )
-
-    insured_members = _build_insured_members(travel.get("travellers", []))
-
-    gig_request = {
-        "policySchedule": {
-            "creationDate": creation_date,
-            "effectiveDate": effective_date,
-            "expirationDate": expiration_date,
-            "policyType": policy_type,
-        },
-        "travelInformation": {
+        travel_information = {
             "originCountry": {
                 "code": origin_country["code"],
                 "value": origin_country["value"],
@@ -203,17 +192,52 @@ def build_gig_request(canonical_payload: Dict[str, Any]) -> Dict[str, Any]:
                 }
             ],
             "areaOfCoverage": area_of_coverage,
+        }
+
+    else:
+        # 🔹 Outbound:
+        #   origin = UAE (fixed)
+        #   NO destinationCountries field in request
+        #   areaOfCoverage = WWXUC (fixed)
+        origin_country = COUNTRY_CODE_MAP["uae"]
+
+        area_of_coverage = {
+            "code": "WWXUC",
+            "value": "Worldwide excluding USA/Canada",
+        }
+
+        travel_information = {
+            "originCountry": {
+                "code": origin_country["code"],
+                "value": origin_country["value"],
+            },
+            "areaOfCoverage": area_of_coverage,
+            # ⚠ no "destinationCountries" for outbound as per API sample
+        }
+
+    # 4) Insured members
+    insured_members = _build_insured_members(travel.get("travellers", []))
+
+    gig_request = {
+        "policySchedule": {
+            "creationDate": creation_date,
+            "effectiveDate": effective_date,
+            "expirationDate": expiration_date,
+            "policyType": policy_type,
         },
+        "travelInformation": travel_information,
         "insuredMembers": insured_members,
         "schemeId": "64824A00001",
         "branchId": {"code": "13", "value": "Dubai"},
         "includeOriginalPremium": "true",
         "includeOptionalCoverPremium": "true",
     }
+
     print("\n====== GIG QUOTES SINGLE EVENT ======")
     print(json.dumps(gig_request, indent=2))
     print("=====================================\n")
-    return gig_request    
+
+    return gig_request   
 
 
 # -------------------------------------------------------------------

@@ -155,9 +155,9 @@ def build_rak_request(canonical_payload: Dict[str, Any]) -> Dict[str, Any]:
     else:
         # Outbound: use full names
         if "annual" in plan_type_raw:
-            trip_type_value = "Annual Trip"
+            trip_type_value = "Annual"
         else:
-            trip_type_value = "Single Trip"
+            trip_type_value = "Single"
 
     # cover_type → traveller label
     traveller_label = travel.get("cover_type") or (
